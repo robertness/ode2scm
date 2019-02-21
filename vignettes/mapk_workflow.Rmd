@@ -1,0 +1,181 @@
+---
+title: "Mechanistic MAPK Models and Structural Causal Models"
+author: "Robert Osazuwa Ness"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(ode2scm)
+```
+
+`reticulate` is used to run Python. To run this vignette, you need to point to a particular installation of Python.  I use a virtual environment in the project home directory called venv.
+
+```{r}
+library(reticulate)
+use_virtualenv('venv')
+```
+
+```{r}
+rates <- list(
+  raf_activate=0.1,
+  raf_deactivate=0.1,
+  mek_activate=0.1,
+  mek_deactivate=2.0,
+  erk_activate=0.1,
+  erk_deactivate=1.0
+)
+
+initial_states <-  list(E1=1, Raf=100, PRaf=0, Mek=100, PMek=0, PPMek=0, Erk=100, PErk=0, PPErk=0)
+
+times <- seq(0, 30, by = .1)
+
+det_transition_func <- mapk_ode(initial_states, rates)
+ode_out <- ode_sim(det_transition_func, initial_states, times)
+
+# Multiplying rates by 20 to speed up Gillespie
+faster_rates <- lapply(rates, `*`, 20)
+stoc_transition_function <- mapk_sde(initial_states, faster_rates)
+sde_out <- sde_sim(stoc_transition_function, initial_states, times)
+```
+
+```{r}
+g1 <- function(a) a / (a + 1)
+g2 <- function(a) a^2 / (a^2 + a + 1)
+
+# Totals depends on initial states, total Raf is Raf + PRaf, total Mek is Mek + PMek + PPMek, etc
+# Writing out explicitly to keep things simple.
+totals <- list(Raf=100, Mek=100, Erk=100)
+
+E1 <- initial_states$E1
+raf <- totals$Raf * g1(E1 * rates$raf_activate / rates$raf_deactivate)
+mek <- totals$Mek * g2(raf * rates$mek_activate / rates$mek_deactivate)
+erk <- totals$Erk * g2(mek * rates$erk_activate / rates$erk_deactivate)
+steady_states <- list(Raf=raf, Mek=mek, Erk=erk)
+```
+
+```{r}
+plot(times, ode_out$PRaf, type='l', col='darkgreen', ylim=c(0, 110))
+lines(sde_out$PRaf, type='l', col='darkgreen', lty=3)
+abline(h = raf, col='darkgreen', lty=2)
+
+lines(times, ode_out$PPMek, type='l', col='darkorange')
+lines(sde_out$PPMek, type='l', col='darkorange', lty=3)
+abline(h = mek, col='darkorange', lty=2)
+
+lines(times, ode_out$PPErk, type='l', col='darkred')
+lines(sde_out$PPErk, type='l', col='darkred', lty=3)
+abline(h = erk, col='darkred', lty=2)
+```
+
+# Counterfactual inference
+
+## Counterfactual with a SDE
+
+```{r}
+seed <- 123
+observed_steady_state <- sim_from_random_seed(seed, initial_states, 50, stoc_transition_function)
+```
+
+```{r}
+intervention_rates <- rates
+intervention_rates$raf_activate <- rates$raf_activate / 3
+#speed up (raf is still proportionally slower to activate)
+intervention_transition_function <- mapk_sde(initial_states,  lapply(intervention_rates, `*`, 20))
+counterfactual_steady_state <- sim_from_random_seed(seed, initial_states, 50, intervention_transition_function)
+
+sde_causal_effect <- observed_steady_state$Erk - counterfactual_steady_state$Erk
+
+det_transition_func <- mapk_ode(initial_states, intervention_rates)
+ode_out <- ode_sim(det_transition_func, initial_states, times)
+intervention_equivalent <- ode_out$PRaf[ode_out$time == 50]
+```
+
+
+```{python}
+# Work in prgress
+from functools import partial
+from torch import tensor
+
+from pyro import condition, do, sample
+from pyro.distributions import Normal, Delta
+from pyro.infer import EmpiricalMarginal, Importance
+
+# Import R objects
+rates = {k: tensor(v) for k, v in r.rates.items()}
+steady_states = {k: tensor(v) for k, v in r.steady_states.items()}
+totals = {k: tensor(v) for k, v in r.totals.items()}
+
+# Structural Assignments
+
+def g1(a):
+    return a / (a + tensor(1.))
+
+def g2(a):
+    return a**2 / (a**2 + a + tensor(1.))
+
+def f_Raf(N):
+    E1 = tensor(1.)
+    mu = totals['Raf'] * g1(E1 * rates['raf_activate']/rates['raf_deactivate'])
+    Raf = N * mu + mu
+    return Raf
+
+def f_Mek(Raf, N):
+    mu = totals['Mek'] * g1(Raf * rates['mek_activate']/rates['mek_deactivate'])
+    Mek = N * mu + mu
+    return Mek
+    
+def f_Erk(Mek, N):
+    mu = totals['Erk'] * g1(Mek * rates['erk_activate']/rates['erk_deactivate'])
+    Erk = N * mu + mu
+    return Erk
+
+#Noise distribution
+noise = {'N_Raf': Normal(0., 1.), 'N_Mek': Normal(0., 1.), 'N_Erk': Normal(0., 1.)}
+
+# Model
+def model(noise):
+  N_Raf = sample('N_Raf', noise['N_Raf'])
+  N_Mek = sample('N_Mek', noise['N_Mek'])
+  N_Erk = sample('N_Erk', noise['N_Erk'])
+  Raf = sample('Raf', Delta(f_Raf(N_Raf)))
+  Mek = sample('Mek', Delta(f_Mek(Raf, N_Mek)))
+  Erk = sample('Erk', Delta(f_Erk(Mek, N_Erk)))
+  return Erk
+  
+def noisy_model(noise):
+  N_Raf = sample('N_Raf', noise['N_Raf'])
+  N_Mek = sample('N_Mek', noise['N_Mek'])
+  N_Erk = sample('N_Erk', noise['N_Erk'])
+  Raf = sample('Raf', Spike(f_Raf(N_Raf)))
+  Mek = sample('Mek', Spike(f_Mek(Raf, N_Mek)))
+  Erk = sample('Erk', Spike(f_Erk(Mek, N_Erk)))
+
+# Noise inference
+Spike = partial(Normal, scale=tensor(.1))
+observation_model = condition(noisy_model, r.observed_steady_state)
+posterior = Importance(observation_model, num_samples=1000).run(noise)
+updated_noise = {k: EmpiricalMarginal(posterior, sites = k) for k in noise.keys()}
+
+# Counterfactual inference
+intervention_model = do(model, {'Raf': tensor(20.0)})
+counterfactual_dist = Importance(intervention_model, num_samples=1000).run(updated_noise)
+counterfactual_erk = EmpiricalMarginal(counterfactual_dist, sites = 'Erk')
+scm_causal_effect = [float(counterfactual_erk.sample()  - r.observed_steady_state['Erk']) for _ in range(100)]
+```
+
+```{r}
+hist(py$scm_causal_effect)
+abline(v=sde_causal_effect)
+```

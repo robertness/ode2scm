@@ -1,0 +1,8 @@
+docs
+.Rproj.user
+ode2scm.Rproj
+.Rhistory
+.RData
+inst/doc
+revdep/checks
+revdep/library
