@@ -18,14 +18,17 @@ knitr::opts_chunk$set(
 
 ```{r}
 library(ode2scm)
+# Connect Python virtual environment
+#use_virtualenv('venv', require=TRUE)
 ```
 
-`reticulate` is used to run Python. To run this vignette, you need to point to a particular installation of Python.  I use a virtual environment in the project home directory called venv.
+# Modeling and simulating the pathway
 
-```{r}
-library(reticulate)
-use_virtualenv('venv')
-```
+Here are some rates and initial states that we are going to use for the MAPK model.  Note that the initial states determine the range of possible values at any time point including after steady state.  For example, the sum of Mek, PMek, and PPMek is constant.  
+
+It is important that the steady states are not close to the boundary values.  For example, the steady state of PPMek should not be 100 or too close to 100 if Mek + PMek + PPMek == 100.  Otherwise the formulation of the SCM we are using will not work.  So when running sensitivity tests, you want to check the steady state values you get are not on the boundaries.
+
+I use Raf, Mek, and Erk to refer to MAPKKK, MAPKK, and MAPK respectively.
 
 ```{r}
 rates <- list(
@@ -38,17 +41,22 @@ rates <- list(
 )
 
 initial_states <-  list(E1=1, Raf=100, PRaf=0, Mek=100, PMek=0, PPMek=0, Erk=100, PErk=0, PPErk=0)
+```
 
+The following performs the ODE and SDE simulation. See the models in R/mapk.R and simuilation functions for explanation.
+
+```{r}
 times <- seq(0, 30, by = .1)
-
 det_transition_func <- mapk_ode(initial_states, rates)
 ode_out <- ode_sim(det_transition_func, initial_states, times)
 
 # Multiplying rates by 20 to speed up Gillespie
 faster_rates <- lapply(rates, `*`, 20)
-stoc_transition_function <- mapk_sde(initial_states, faster_rates)
-sde_out <- sde_sim(stoc_transition_function, initial_states, times)
+stoc_transition_func <- mapk_sde(initial_states, faster_rates)
+sde_out <- sde_sim(stoc_transition_func, initial_states, times)
 ```
+
+The structure of the SCM is based on the analytical solution to steady state.  So here I calculate the steady state values using the steady state analytical solution for these reactions, just to make sure they are the same as the values from the ODE sim (and that the values of the SDE sim are centered around this value.)
 
 ```{r}
 g1 <- function(a) a / (a + 1)
@@ -56,126 +64,208 @@ g2 <- function(a) a^2 / (a^2 + a + 1)
 
 # Totals depends on initial states, total Raf is Raf + PRaf, total Mek is Mek + PMek + PPMek, etc
 # Writing out explicitly to keep things simple.
-totals <- list(Raf=100, Mek=100, Erk=100)
+totals <- with(initial_states, {
+  list(Raf=Raf+PRaf, Mek=Mek + PMek + PPMek, Erk=Erk + PErk + PPErk)
+})
 
 E1 <- initial_states$E1
-raf <- totals$Raf * g1(E1 * rates$raf_activate / rates$raf_deactivate)
-mek <- totals$Mek * g2(raf * rates$mek_activate / rates$mek_deactivate)
-erk <- totals$Erk * g2(mek * rates$erk_activate / rates$erk_deactivate)
-steady_states <- list(Raf=raf, Mek=mek, Erk=erk)
+Raf <- totals$Raf * g1(E1 * rates$raf_activate / rates$raf_deactivate)
+Mek <- totals$Mek * g2(Raf * rates$mek_activate / rates$mek_deactivate)
+Erk <- totals$Erk * g2(Mek * rates$erk_activate / rates$erk_deactivate)
+
+steady_states <- list(Raf=Raf, Mek=Mek, Erk=Erk)
 ```
+
+Plot everything and make sure they align and are not close to boundaries.
 
 ```{r}
 plot(times, ode_out$PRaf, type='l', col='darkgreen', ylim=c(0, 110))
 lines(sde_out$PRaf, type='l', col='darkgreen', lty=3)
-abline(h = raf, col='darkgreen', lty=2)
+abline(h = Raf, col='darkgreen', lty=2)
 
 lines(times, ode_out$PPMek, type='l', col='darkorange')
 lines(sde_out$PPMek, type='l', col='darkorange', lty=3)
-abline(h = mek, col='darkorange', lty=2)
+abline(h = Mek, col='darkorange', lty=2)
 
 lines(times, ode_out$PPErk, type='l', col='darkred')
 lines(sde_out$PPErk, type='l', col='darkred', lty=3)
-abline(h = erk, col='darkred', lty=2)
+abline(h = Erk, col='darkred', lty=2)
 ```
 
-# Counterfactual inference
+# How to run a sensitivity analysis for counterfactual inference on SCMs derived from mechanistic models.
 
-## Counterfactual with a SDE
+We know we can do a counterfactual query on a SCM.  Our goal is to then simulate a counterfactual with the ODE and SDE, and make sure that the counterfactual query on the SCM returns a result that matches the simulation.
 
-```{r}
-seed <- 123
-observed_steady_state <- sim_from_random_seed(seed, initial_states, 50, stoc_transition_function)
+Variables for the sensitivity analysis:
+
+* Rates.  Generate these randomly in advance, but only keep those that don't cause any of the proteins to hit the boundaries at steady state.
+* ODE vs SDE. The ODE is the base case, the SDE ensures that counterfactual inference is robust enough to deal with stochasticity. 
+
+## Pseudocode for ODE analysis
+
+```
+ode_causal_effects = [] # list of floats
+scm_causal_effects = [] # list of lists, each element is samples from distribution
+
+for rate_set in rate_sets:
+  # With ODE model
+  run ODE with rate_set, define raf0, mek0, erk0 as steady states of PRaf, PPMek, and PPErk
+  change the Raf activation rate to a valid new number
+  run the ODE with updated rate set, define raf1, erk1 as steady state PRaf/PPErk
+  append erk1 - erk0 to ode_causal_effects
+  
+  # With SCM
+  observation_model = condition(scm_model, Raf=raf0, Mek=mek0, Erk=erk0
+  updated_noise <- infer(observation_model, noise, target=noise)
+  counterfactual_model = do(scm_model, Raf=raf1)
+  counterfactual_dist = infer(counterfactual_model, updated_noise, target=Erk)
+  samples = []
+  for i in 1:100:
+    append (counterfactual_dist.sample() - raf0) to samples
+  append samples to scm_causal_effects
 ```
 
+## Instance of ODE analysis with one set of rates
+
+The sensitivity analysis would do this across a set of rates.
+
 ```{r}
+# R code
+last_time <- 50
+times <- seq(0, last_time, by = .1)
+source_python(system.file("python", "mapk_scm.py", package = "ode2scm"))
+
+# Simulate a steady state observation
+ode_out_1 <- ode_sim(mapk_ode(initial_states, rates), initial_states, times)
+n <- which(ode_out_1$time == 50)
+observation <- list(
+  Raf = ode_out_1$PRaf[n],
+  Mek = ode_out_1$PPMek[n],
+  Erk = ode_out_1$PPErk[n]
+)
+
+# Simulate a counterfactual. In this case, reduce Ras activate to a 1/3 of original value
+# Collect Raf outcome and Erk outcome.
 intervention_rates <- rates
 intervention_rates$raf_activate <- rates$raf_activate / 3
-#speed up (raf is still proportionally slower to activate)
-intervention_transition_function <- mapk_sde(initial_states,  lapply(intervention_rates, `*`, 20))
-counterfactual_steady_state <- sim_from_random_seed(seed, initial_states, 50, intervention_transition_function)
+ode_out_2 <- ode_sim(mapk_ode(initial_states, intervention_rates), initial_states, times)
 
-sde_causal_effect <- observed_steady_state$Erk - counterfactual_steady_state$Erk
+raf_intervention <- list(Raf=ode_out_2$PRaf[n])
 
-det_transition_func <- mapk_ode(initial_states, intervention_rates)
-ode_out <- ode_sim(det_transition_func, initial_states, times)
-intervention_equivalent <- ode_out$PRaf[ode_out$time == 50]
-```
+ode_causal_effect <- ode_out_1$PPErk[n] - ode_out_2$PPErk[n]
 
-
-```{python}
-# Work in prgress
-from functools import partial
-from torch import tensor
-
-from pyro import condition, do, sample
-from pyro.distributions import Normal, Delta
-from pyro.infer import EmpiricalMarginal, Importance
-
-# Import R objects
-rates = {k: tensor(v) for k, v in r.rates.items()}
-steady_states = {k: tensor(v) for k, v in r.steady_states.items()}
-totals = {k: tensor(v) for k, v in r.totals.items()}
-
-# Structural Assignments
-
-def g1(a):
-    return a / (a + tensor(1.))
-
-def g2(a):
-    return a**2 / (a**2 + a + tensor(1.))
-
-def f_Raf(N):
-    E1 = tensor(1.)
-    mu = totals['Raf'] * g1(E1 * rates['raf_activate']/rates['raf_deactivate'])
-    Raf = N * mu + mu
-    return Raf
-
-def f_Mek(Raf, N):
-    mu = totals['Mek'] * g1(Raf * rates['mek_activate']/rates['mek_deactivate'])
-    Mek = N * mu + mu
-    return Mek
-    
-def f_Erk(Mek, N):
-    mu = totals['Erk'] * g1(Mek * rates['erk_activate']/rates['erk_deactivate'])
-    Erk = N * mu + mu
-    return Erk
-
-#Noise distribution
-noise = {'N_Raf': Normal(0., 1.), 'N_Mek': Normal(0., 1.), 'N_Erk': Normal(0., 1.)}
-
-# Model
-def model(noise):
-  N_Raf = sample('N_Raf', noise['N_Raf'])
-  N_Mek = sample('N_Mek', noise['N_Mek'])
-  N_Erk = sample('N_Erk', noise['N_Erk'])
-  Raf = sample('Raf', Delta(f_Raf(N_Raf)))
-  Mek = sample('Mek', Delta(f_Mek(Raf, N_Mek)))
-  Erk = sample('Erk', Delta(f_Erk(Mek, N_Erk)))
-  return Erk
-  
-def noisy_model(noise):
-  N_Raf = sample('N_Raf', noise['N_Raf'])
-  N_Mek = sample('N_Mek', noise['N_Mek'])
-  N_Erk = sample('N_Erk', noise['N_Erk'])
-  Raf = sample('Raf', Spike(f_Raf(N_Raf)))
-  Mek = sample('Mek', Spike(f_Mek(Raf, N_Mek)))
-  Erk = sample('Erk', Spike(f_Erk(Mek, N_Erk)))
-
-# Noise inference
-Spike = partial(Normal, scale=tensor(.1))
-observation_model = condition(noisy_model, r.observed_steady_state)
-posterior = Importance(observation_model, num_samples=1000).run(noise)
-updated_noise = {k: EmpiricalMarginal(posterior, sites = k) for k in noise.keys()}
-
-# Counterfactual inference
-intervention_model = do(model, {'Raf': tensor(20.0)})
-counterfactual_dist = Importance(intervention_model, num_samples=1000).run(updated_noise)
-counterfactual_erk = EmpiricalMarginal(counterfactual_dist, sites = 'Erk')
-scm_causal_effect = [float(counterfactual_erk.sample()  - r.observed_steady_state['Erk']) for _ in range(100)]
+scm_causal_effect_samples <- scm_erk_counterfactual(
+  rates,
+  totals,
+  observation,
+  raf_intervention
+)
 ```
 
 ```{r}
-hist(py$scm_causal_effect)
-abline(v=sde_causal_effect)
+hist(
+  scm_causal_effect_samples,
+  main = 'Causal Effect Distribution',
+  sub='Red = ODE Causal Effect',
+  xlab='Causal Effects',
+  freq=F
+)
+abline(v=ode_causal_effect, col='red')
+```
+
+The SCM produces samples, the ODE provides ground truth.
+
+## Pseudocode for SDE analysis
+
+```
+  sde_causal_effects = [] # list of lists
+  scm_causal_effects = [] # list of lists, each element is samples from distribution
+  for rate_set in rate_sets:
+    # With ODE and SDE model
+    initialize a set of random seeds as Seeds
+    samples = [] # list of floats
+    for seed in seeds:
+      set_seed(seed)
+      run SDE with rate_set, define raf0, mek0, erk0 as steady states of PRaf, PPMek, and PPErk
+      change the Raf activation rate to a valid new number
+      run the ODE with updated rate set, define raf1 as ODE steady state for PRaf
+      run the SDE with updated rate set, define erk1 as SDE steady state for PPErk
+      append erk1 - erk0 to samples
+    append samples to sde_causal_effects
+    
+    # With SCM
+    observation_model = condition(scm_model, Raf=raf0, Mek=mek0, Erk=erk0
+    updated_noise <- infer(observation_model, noise, target=noise)
+    counterfactual_model = do(scm_model, Raf=raf1)
+    counterfactual_dist = infer(counterfactual_model, updated_noise, target=Erk)
+    samples = []
+    for i in 1:100:
+      append (counterfactual_dist.sample() - raf0) to samples
+    append samples to scm_causal_effects
+```
+
+## Instance of SDE analysis with one set of rates
+
+The sensitivity analysis would do this across a set of rates.
+
+```{r}
+time_point <- 50
+
+# Simulate a counterfactual with the ODE. In this case, reduce Ras activate to a 1/3 of original value
+# Collect Raf outcome and Erk outcome.
+intervention_rates <- rates
+intervention_rates$raf_activate <- rates$raf_activate / 3
+ode_out <- ode_sim(mapk_ode(initial_states, intervention_rates), initial_states, times)
+raf_intervention <- list(Raf=ode_out$PRaf[n])
+
+sde_causal_effects <- NULL
+scm_causal_effect_samples <- NULL
+
+for(seed in c(
+  010203, 030405, 060708, 091011, 121314, 141516, 161718, 192021, 202122, 232425, 262728, 293031, 323334,
+  410203, 040405, 064708, 091411, 121344, 141514, 561718, 152021, 205122, 232525, 262758, 293035, 623334
+  )
+){
+  # Simulate a steady state observation
+  set.seed(seed)
+  sde_out_1 <- sde_sim(mapk_sde(initial_states, rates), initial_states, times)
+  n <- which(sde_out_1$time == 50)
+  observation <- list(
+    Raf = sde_out_1$PRaf[n],
+    Mek = sde_out_1$PPMek[n],
+    Erk = sde_out_1$PPErk[n]
+  )
+  set.seed(seed)
+  sde_out_2 <- sde_sim(mapk_sde(initial_states, intervention_rates), initial_states, times)
+  sde_causal_effects <- c(sde_causal_effects, sde_out_1$PPErk[n] - sde_out_2$PPErk[n])
+  
+  scm_causal_effect_samples <- c(
+    scm_causal_effect_samples,
+    scm_erk_counterfactual(
+      rates,
+      totals,
+      observation,
+      raf_intervention
+    )
+  )
+}
+```
+
+```{r}
+hist(
+  scm_causal_effect_samples,
+  main = 'Causal Effect Distribution',
+  sub='Red = SDE Causal Effect, Blue = SCM Causal Effect',
+  xlab='Causal Effects',
+  freq=F,
+  col=rgb(0, 0, 1, 0.5),
+  xlim = c(-5, 30)
+)
+hist(
+  sde_causal_effects,
+  freq=F,
+  col=rgb(1, 0, 0, 0.5),
+  add=TRUE
+)
+
 ```
