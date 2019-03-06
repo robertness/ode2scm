@@ -3,11 +3,13 @@ ode_sim <- function(transition_function, initial_states, times){
   rates <- attr(transition_function, 'rates')
   rates <- structure(as.numeric(rates), names = names(rates))
   as_tibble(
-    deSolve::ode(
-      y = initial_states,
-      times = times,
-      func = transition_function,
-      parms = rates
+    as.data.frame(
+      deSolve::ode(
+        y = initial_states,
+        times = times,
+        func = transition_function,
+        parms = rates
+      )
     )
   )
 }

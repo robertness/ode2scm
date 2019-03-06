@@ -211,7 +211,7 @@ The sensitivity analysis would do this across a set of rates.
 ```{r}
 time_point <- 50
 
-# Simulate a counterfactual with the ODE. In this case, reduce Ras activate to a 1/3 of original value
+# Simulate a counterfactual with the ODE. In this case, reduce Raf activate to a 1/3 of original value
 # Collect Raf outcome and Erk outcome.
 intervention_rates <- rates
 intervention_rates$raf_activate <- rates$raf_activate / 3
