@@ -1,0 +1,180 @@
+---
+title: "Modeling the MAPK pathway as a causal constraints model"
+author: "Robert Ness"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r}
+library(ode2scm)
+```
+
+## Introduction to the MAPK signaling pathwary
+
+The [mitogen-activated protein kinase](https://en.wikipedia.org/wiki/MAPK/ERK_pathway) (MAPK) pathway is important in many biological processes, such as determination of cell fate. It is a cascade of three proteins, a MAPK (aka Erk), a MAPK kinase (MAP2K, aka Mek), and a MAPK kinase kinase (MAP3K, aka Raf), represented with a causal diagram.
+\begin{eqnarray}
+& \text{E1} \rightarrow \text{MAP3K} \rightarrow \text{MAP2K} \rightarrow \text{MAPK} & \label{eq:MAPKdef}
+\end{eqnarray}
+Here E1 is an input signal to the pathway. The cascade relays the signal from one protein to the next by changing the count of proteins in an active state.
+
+## The biochemical reactions
+
+A protein molecule is in an active state if it has one or more attached phosphoryl groups. Each arrow in \eqref{eq:MAPKdef} combines the reactions of the phosphorylation (i.e., activation) and dephosphorylation (i.e., desactivation). For example, $\text{E1} \rightarrow \text{MAP3K}$ combines two reactions
+\begin{eqnarray}
+\text{E1} + \text{MAP3K} \overset{v^{\text{act}}_{K3}}{\rightarrow} \text{E1} + \text{P-MAP3K} \ \mbox{and}\
+\text{P-MAP3K} \overset{v^{\text{inh}}_{K3}}{\rightarrow} \text{MAP3K}
+\end{eqnarray}
+
+In the first reaction above, a particle of the input signal \text{E1} binds (i.e., activates) a molecule of MAP3K to produce MAP3K with an attached phosphoryl. The rate parameter associated with this reaction is $v^{\text{act}}$. In the second reaction, phosphorylated MAP3K loses its phosphoryl (i.e., deactivates), with the rate $v^{\text{inh}}$.  The remaining arrows between MAP3K and MAP2K, and between MAP2K and MAPK aggregate similar reactions and rate pairs.  However, these reactions represent double-phosphorylations, i.e., they require two activation reactions to activate the protein. This results in a more nuanced dynamics.
+
+## The deterministic mechanistic model
+
+Let $\text{K3}(t)$, $\text{K2}(t)$ and $\text{K}(t)$ denote the counts of fully phosphorylated MAP3K, MAP2K, and MAPK at time $t$. Since MAP2K and MAPK have to be double phosphorylated to be "on" or "active", then $\text{K2}(t)$ and $\text{K}(t)$ represent counts of double phosphorylated proteins. Let $T_{\text{K3}}$, $T_{\text{K2}}$, and $T_{\text{K}}$ represent the total amount of each of the three proteins (unphosphorylated + single-phosphorylation + double-phosphorylation).  Let $E1$ bet the total amount of input signal, which in this model we assume are constant in time.
+
+We model the system as a set of ordinary differential equations $\mathbb{M}$.
+
+$$
+\mathbb{M} =
+\left\{\begin{matrix}
+ \frac{\mathrm{d} \text{K3}}{\mathrm{d} t} =&  v^{\text{act}}_{K3}\text{E1}(T_{\text{K3}}-\text{K3}(t)) - v^{\text{inh}}_{K3}\text{K3}(t)\\ 
+ \frac{\mathrm{d} \text{K2}}{\mathrm{d} t} =&  \frac{(v^{\text{act}}_{K2})^2}{v^{\text{inh}}_{K2}}\text{K3}(t)^2(T_{\text{K2}} - \text{K2}(t)) - v^{\text{act}}_{K2}\text{K3}(t)\text{K2}(t) - v^{\text{inh}}_{K2}\text{K2}(t)\\ 
+ \frac{\mathrm{d} \text{K1}}{\mathrm{d} t} =&  \frac{(v^{\text{act}}_{K1})^2}{v^{\text{inh}}_{K1}}\text{K2}(t)^2(T_{\text{K1}} - \text{K1}(t)) - v^{\text{act}}_{K1}\text{K2}(t)\text{K1}(t) - v^{\text{inh}}_{K1}\text{K1}(t)
+\end{matrix}\right.
+$$
+
+## Building a deterministic steady state model
+
+Let $\text{equil}()$ be an operator that solves and equilbrates the model.  Then:
+
+$$
+\text{equil}(\mathbb{M}) = 
+\left\{\begin{matrix}
+ \text{K3}=&  T_{\text{K3}}g_1(\omega_{K3}\text{E1})\\ 
+ \text{K2}=&  T_{\text{K2}}g_2(\omega_{K2}\text{K3}) \\ 
+ \text{K1}=&  T_{\text{K1}}g_2(\omega_{K1}\text{K2})
+\end{matrix}\right.
+$$
+
+where $\text{K}3$, $\text{K}2$, and $\text{K}1$ are the equilibrium values of $\text{K}3(t)$, $\text{K}2(t)$, and $\text{K}1(t)$, no longer depending on time.  $g_1(u) = \frac{u}{1+u}$, $g_2(u) = \frac{u^2}{1 + u + u^2}$ and $\omega_X = \frac{v^{\text{act}}_{X}}{v^{\text{inh}}_{X}}$.
+
+## Simulating from the model
+
+This packages contains a function for simulating from $\mathbb{M}$ in the directory `R/mapk.R` called `mapk_ode`.  `mapk_ode` is a function takes a set of rate values and initial conditions as arguments and returns a new function that can be passed to `ode_sim`.  `ode_sim` is just a wrapper for the `deSolve::ode` function for numerically solving ODE's in R.  `mapk_ode` works as follows:
+
+```{r}
+rates <- list(
+  raf_activate=0.1,
+  raf_deactivate=0.1,
+  mek_activate=0.1,
+  mek_deactivate=2.0,
+  erk_activate=0.1,
+  erk_deactivate=1.0
+)
+
+initial_states <-  list(E1=1, Raf=100, PRaf=0, Mek=100, PMek=0, PPMek=0, Erk=100, PErk=0, PPErk=0)
+
+times <- seq(0, 120, by = .1)
+
+mapk_ode_instance <- mapk_ode(initial_states, rates)
+ode_out <- ode_sim(mapk_ode_instance, initial_states, times)
+```
+
+For comparison, the following code generates values according to the equilibrium solution.
+
+```{r}
+g1 <- function(a) a / (1 + a )
+g2 <- function(a) a^2 / (1 + a + a^2)
+
+# Totals depends on initial states, total Raf is Raf + PRaf, total Mek is Mek + PMek + PPMek, etc
+# Writing out explicitly to keep things simple.
+totals <- with(initial_states, {
+  list(Raf=Raf+PRaf, Mek=Mek + PMek + PPMek, Erk=Erk + PErk + PPErk)
+})
+
+E1 <- initial_states$E1
+Raf <- totals$Raf * g1(E1 * rates$raf_activate / rates$raf_deactivate)
+Mek <- totals$Mek * g2(Raf * rates$mek_activate / rates$mek_deactivate)
+Erk <- totals$Erk * g2(Mek * rates$erk_activate / rates$erk_deactivate)
+
+steady_states <- list(Raf=Raf, Mek=Mek, Erk=Erk)
+```
+
+The trajectories (solid lines) represent the evolution of the amounts of MAP3K (green), MAP2K (blue), and MAPK (red) in time.  The dashed lines are the calculated equilibrium values.
+
+```{r mapk_plot}
+plot(times, ode_out$PRaf, type='l', col='darkgreen', ylim=c(0, 110), ylab = 'amount')
+lines(ode_out$PPMek, type='l', col='darkblue', ylim=c(0, 110))
+lines(ode_out$PPErk, type='l', col='darkred', ylim=c(0, 110))
+abline(h = Raf, col='darkgreen', lty=2)
+abline(h = Mek, col='darkblue', lty=2)
+abline(h = Erk, col='darkred', lty=2)
+```
+
+
+## TODO (Sara Taheri, Thadryan Sweeney, Yao Xiao) Simulating an ideal intervention
+
+We define an ideal intervention in a dynamic model the same as we would with a structural causal model.  It fixes a protein count variable to a constant value that does not change in time.  For example, the perfect intervention do(K2 = k) applied to $\mathbb{M}$ would modify the model as follows:
+
+$$
+\text{do}(\mathbb{M}, K2 := k) = 
+\left\{\begin{matrix}
+ \frac{\mathrm{d} \text{K3}}{\mathrm{d} t} =&  v^{\text{act}}_{K3}\text{E1}(T_{\text{K3}}-\text{K3}(t)) - v^{\text{inh}}_{K3}\text{K3}(t)\\ 
+ \frac{\mathrm{d} \text{K2}}{\mathrm{d} t} =& 0\\ 
+ \frac{\mathrm{d} \text{K1}}{\mathrm{d} t} =&  \frac{(v^{\text{act}}_{K1})^2}{v^{\text{inh}}_{K1}}k^2(T_{\text{K1}} - \text{K1}(t)) - v^{\text{act}}_{K1}k\text{K1}(t) - v^{\text{inh}}_{K1}\text{K1}(t)
+\end{matrix}\right.
+$$
+
+Create a Pyro like `do` operator that modifies the MAPK model to simulate a perfect intervention.  I should take in `mapk_ode`, and a list of interventions.  The names of the list should be the names of variables in the model.  The values of the list should be intervention values.  It should return a function as before.  For example, it would modify the workflow shown above as follows:
+
+```
+mapk_ode_instance <- mapk_ode(initial_states, rates)
+mapk_ode_intervention <- do(mapk_ode_instance, list(PPMek = k))
+ode_out <- ode_sim(mapk_ode_intervention, initial_states, times)
+```
+
+Here "PPMek" is the same as $K2(t)$, it is how double phosphorylated MAPK2 is specified in the model code.
+
+Confirm your results work using the plotting method above.  Vary the rates and the initial values, and generate plots like the one above.  Verify in these plots that $\text{equil}(\text{do}(\mathbb{M}, X = x)) == \text{do}(\text{equil}(\mathbb{M}, X = x))$.
+
+The paper on [Causal Constraints Models](https://arxiv.org/pdf/1805.06539.pdf) shows that in general $\text{equil}(\text{do}(\mathbb{M}, X = x)) \neq \text{do}(\text{equil}(\mathbb{M}, X = x))$.  So if your model is working for some conditions but not others, this is to be expected. Document those conditions for this model, and eventually you will compare them againt the causal constraint model for MAPK that your classmates will derive in the next section. 
+
+For starters, just get this working on `mapk_ode`.  However, going forward you will to adapt this code to work on other models specified in this package.  So if there are straightforward abstractions that will help your changes generalize and it is easy to implement them now, then do so.  
+
+Changing code based on variables and arguments is [metaprogramming](http://adv-r.had.co.nz/).  To learn more, see the chapter on metaprogramming from the Advanced R book.
+
+## TODO (Liang Xue, Jiaxuan Wu) Deriving a causal constraints model
+
+Given the steady-state $\text{equil}(\mathbb{M})$, we would ideally like to specify this as a causal model and begin reasoning on it in terms of interventions.  However, the causal constraints paper shows that in general $\text{equil}(\text{do}(\mathbb{M}, X = x)) \neq \text{do}(\text{equil}(\mathbb{M}, X = x))$ (see Theorem 1).
+
+### What is a causal constraints model?
+
+We have seen that an SCM starts with a set of endogenous variables connected by a directed graph. The endogenous variables are associated with exogenous noise variables.
+
+Each endogenous variable has a structural assignment function that deterministically sets the endogenous variable's value given input values fron its parent endogenous variable in the graph, and its corresponding noise variables.
+
+In a SCM, this set of structural assignments constrain the solutions of the model in the absence of interventions.   When there is an intervention, a structual assignment of the target variables are just changed or replaced with a constant, further constraining the solution space.
+
+A causal constraints model (CCM) has the same set of endogenous and exogenous variables.  But it replaces the set of structural assignments with a set of *causal constraints*.  A causal constraint is a triple containing: 
+
+1. A structural assignment function $f$
+2. A value in the image of $f$ (zero for observations, non-zero for interventions)
+3. A set of intervention targets for which the constraint is active.
+
+**Write the steady-state state solution of the MAPK model as a CCM.**
+
+Advice: Reread the multilayer perceptron example from Uri Alon's Introduction to Systems Biology.  MAPK is a signal transduction pathway, and this example concerns signaling transduction pathways and uses the same math.  Also work through the math for deriving the steady state solution in the appendix.  Once you are familiar with this, work through the biochemical reaction network example in the CCM paper.
+
+## Relating pending TODOs
+
+The rest of the course project will flow from this work.  It will include comparing results between groups to make sure they are consistent, implementing this MAPK model well as a more complex model as a CCM, and extending the modeling to stochastic settings.

@@ -19,7 +19,7 @@ knitr::opts_chunk$set(
 ```{r}
 library(ode2scm)
 # Connect Python virtual environment
-#use_virtualenv('venv', require=TRUE)
+use_virtualenv('venv', require=TRUE)
 ```
 
 # Modeling and simulating the pathway
@@ -43,7 +43,7 @@ rates <- list(
 initial_states <-  list(E1=1, Raf=100, PRaf=0, Mek=100, PMek=0, PPMek=0, Erk=100, PErk=0, PPErk=0)
 ```
 
-The following performs the ODE and SDE simulation. See the models in R/mapk.R and simuilation functions for explanation.
+The following performs the ODE and SDE simulation. See the models in R/mapk.R and simulation functions for explanation.
 
 ```{r}
 times <- seq(0, 30, by = .1)
