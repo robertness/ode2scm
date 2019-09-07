@@ -7,3 +7,6 @@ inst/doc
 revdep/checks
 revdep/library
 inst/python/__pycache__
+
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
