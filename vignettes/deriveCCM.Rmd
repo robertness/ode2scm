@@ -1,0 +1,231 @@
+---
+title: "Modeling the MAPK pathway: Derive CCM model"
+author: "Liang Xue, Jiaxuan Wu"
+date: "8/4/2019"
+header-includes:
+  - \usepackage{graphicx}
+  - \usepackage[version=4]{mhchem}
+  - \usepackage{booktabs}
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+Structural Causal Models(SCMs) is a widely-used causal modeling framework. However, it is not powerful enough in representing dynamical systems at equilibrium. To solve this problem, Blom and Mooij [1] proposed a generalize SCM, called Causal Constraints Model(CCM), which could capture the causal semantics in dynamical systems comparing with SCMs. This project focus on a biological process, Mitogrn-activated protein kinase (MAPK) pathway, and try to derive CCM on this pathway.
+
+# Derive Causal Constraints Models
+
+## Brief Introduction of CCM
+
+To model the effects of all perfect interventions, SCM could only give several structural equations, which leaves no freedom to model the dependence on initial conditions, while CCM is specified by causal constraints, which are the relations between variables that constrain the solutions of the model under explicitly specified intervention targets. 
+
+## Mitogrn-activated protein kinase (MAPK) pathway
+In this project, our group mainly focus on an important biological process, MAPK pathway. It is a cascade of three proteins, a MAPK (aka Erk), a MAPK kinase (MAP2K, aka Mek), and a MAPK kinase kinase (MAP3K, aka Raf), represented with a causal diagram.
+
+\begin{eqnarray*}
+& \text{E1} \rightarrow \text{MAP3K} \rightarrow \text{MAP2K} \rightarrow \text{MAPK} &
+\end{eqnarray*}
+
+## The boichemical reactions
+
+A protein molecule is in an active state if it has one or more attached phosphoryl groups. Each arrow in the equation above combines the reactions of the phosphorylation (i.e., activation) and dephosphorylation (i.e., desactivation). For example, $\text{E1} \rightarrow \text{MAP3K}$ combines two reactions
+\begin{eqnarray*}
+\text{E1} + \text{MAP3K} \overset{v^{\text{act}}_{K3}}{\rightarrow} \text{E1} + \text{P-MAP3K} \ \mbox{and}\
+\text{P-MAP3K} \overset{v^{\text{inh}}_{K3}}{\rightarrow} \text{MAP3K}
+\end{eqnarray*}
+
+From the above reaction, we can figure out the ordinary differential equations $\mathbb{M}$.
+
+$$
+\mathbb{M} =
+\left\{\begin{matrix}
+ \frac{\mathrm{d} \text{K3}}{\mathrm{d} t} =&  v^{\text{act}}_{K3}\text{E1}(T_{\text{K3}}-\text{K3}(t)) - v^{\text{inh}}_{K3}\text{K3}(t)\\ 
+ \frac{\mathrm{d} \text{K2}}{\mathrm{d} t} =&  \frac{(v^{\text{act}}_{K2})^2}{v^{\text{inh}}_{K2}}\text{K3}(t)^2(T_{\text{K2}} - \text{K2}(t)) - v^{\text{act}}_{K2}\text{K3}(t)\text{K2}(t) - v^{\text{inh}}_{K2}\text{K2}(t)\\ 
+ \frac{\mathrm{d} \text{K1}}{\mathrm{d} t} =&  \frac{(v^{\text{act}}_{K1})^2}{v^{\text{inh}}_{K1}}\text{K2}(t)^2(T_{\text{K1}} - \text{K1}(t)) - v^{\text{act}}_{K1}\text{K2}(t)\text{K1}(t) - v^{\text{inh}}_{K1}\text{K1}(t)
+\end{matrix}\right.
+$$
+
+## Find Equilibrium
+
+Before constructing the Causal Constraints Model (CCM), we need first figure out the Structual Causal Model (SCM) from the ordinary differential equations $\mathbb{M}$. In order to achieve that, first, find the steady state of $K_1, K_2, K_3$.
+
+First of all, to find the steady state of $K_3$, we let $\frac{dK_3}{dt}  = 0$, then we have:
+
+\begin{align*}
+& \frac{dK_3}{dt}  = 0 \\
+& v^{act}_{K_3}E_1(T_{K_3}-K_3(t))-v^{inh}_{K_3}K_3(t)=0 \\
+& v^{act}_{K_3}E_1T_{K_3}-v^{act}_{K_3}E_1K_3(t)=v^{inh}_{K_3}K_3(t) \\
+& \frac{v^{act}_{K_3}}{v^{inh}_{K_3}}E_1T_{K_3}-\frac{v^{act}_{K_3}}{v^{inh}_{K_3}}E_1K_3(t)=K_3(t) \\
+& K_3(t)=\frac{\frac{v^{act}_{K_3}}{v^{inh}_{K_3}}E_1T_{K_3}}{1+\frac{v^{act}_{K_3}}{v^{inh}_{K_3}}E_1}
+\end{align*} 
+
+Let $g_1(u)=\frac{u}{1+u}$ so we have $K_3^*=T_{K_3}g_1(\omega_{K_3}E1)$ where $\omega_{k_3}=\frac{v^{act}_{K_3}}{v^{inh}_{K_3}}$. 
+
+Similarily, we can find the steady state for $K_2, K_1$
+
+\begin{align*}
+& \frac{dK_2}{dt}=0 \\
+& \frac{(v^{act}_{K_2})^2}{v^{inh}_{k_2}}K_3^2(t)T_{K_2}-\frac{(v^{act}_{K_2})^2}{(v^{inh}_{k_2}}K_3)^2(t)K_2(t)-v^{inh}_{K_2}K_2(t)=0 \\
+& (\frac{v^{act}_{K_2}}{v^{inh}_{K_2}})^2K_3^2(t)T_{K_2}-(\frac{v^{act}_{K_2}}{v^{inh}_{K_2}})^2K_3^2(t)K_2(t)-\frac{v^{act}_{K_2}}{v^{inh}_{K_2}}K_3(t)k_2(t)-K_2(t)=0 \\
+& K_2(t)=\frac{(\frac{v^{act}_{K_2}}{v^{inh}_{K_2}})^2K_3^2(t)T_{K_2}}{1+(\frac{v^{act}_{K_2}}{v^{inh}_{K_2}})^2K_3^2(t)+\frac{v^{act}_{K_2}}{v^{inh}_{K_2}}K_3(t)}
+\end{align*}
+
+Here we can also define a function $g_2(u)=\frac{u^2}{1+u+u^2}$ so that we can rewrite the above equation as $K_2(t)=T_{K_3}g_2(\omega_{K_2}K_3)$ where $\omega_{K_2}$ represents $\frac{v^{act}_{K_2}}{{v^{inh}_{K_2}}}$
+
+Find the equilibrium of $K_1$ is same as $K_2$, we can easily get the equation of $K_1$:
+
+\begin{align*}
+K_1(t)=\frac{(\frac{v^{act}_{K_1}}{v^{inh}_{K_1}})^2K_2^2(t)T_{K_1}}{1+(\frac{v^{act}_{K_1}}{v^{inh}_{K_1}})^2K_2^2(t)+\frac{v^{act}_{K_1}}{v^{inh}_{K_1}}K_2(t)}
+\end{align*}
+
+Then we rewrite this equation as $K_1(t)=T_{K_2}g_2(\omega_{K_1}K_2)$ where $\omega_{K_1}=\frac{v^{act}_{K_1}}{v^{inh}_{K_1}}$.
+
+To conclude, the equilibrium of this reaction is:
+\begin{equation*} 
+\left\{
+             \begin{aligned} 
+             K_3^* & = T_{K_3}g_1(\omega_{K3}E_1), \\
+             K_2^* & = T_{K_2}g_2(\omega_{K_2}K_3), \\
+             K_1^* & = T_{K_1}g_2(\omega_{K_1}K_2)
+             \end{aligned} 
+\right. 
+\end{equation*} 
+
+Where $K_3^*,K_2^*,K_1^*$ are the equilibrium values of $K_3(t),K_2(t),K_1(t)$, $g_1(u)=\frac{u}{1+u}, g_2(u)=\frac{u^2}{1+u+u^2}$ and $\omega_X=\frac{v^{act}{X}}{v^{inh}_X}$
+
+# Proof of CCM
+
+## Our MAPK pathway fulfills basic enzymatic reaction model described in Alon's paper (Appendix).
+
+They are both a model of the action of an enzyme X on its substrate S, to catalyze formation of product P. Enzyme X and substrate S bind with rate $k_{on}$ to form a complex $[XS]$, which dissociates with rate $k_{off}$.[2]
+
+## Blom and Mooij's basic enzymatic reaction model (equation 2-6)[1] is equivalent to Alon's model (Appendix)[2]. Proof is below.
+
+1) In Alon's model,
+\begin{equation}
+\ce{X + S <=>[\ce{K_{on}}][\ce{K_{off}}]
+$\ce{[XS]}$
+->[\ce{V}]
+$\ce{X + P}$
+} \tag{1}
+\end{equation}
+
+2) In Blom and Mooij's model,
+\begin{equation}
+\ce{E + \underset{\uparrow{\ce{K_{0}}}}{S} <=>[\ce{K_{1}}][\ce{K_{-1}}]
+$\ce{C}$
+->[\ce{K_{2}}]
+\ce{E + \underset{\downarrow{\ce{K_{3}}}}{P}}
+} \tag{2}
+\end{equation}
+When $K_0 = 0, K_3 = 0$, two models are equivalent. So the CCM model with all constraints can applied to Alon's reaction class, including MAPK pathway.
+
+## There is no constraints for any one of three enzyme reaction in MAPK pathway. Proof is shown below.
+
+Reaction E1 $->$ MAP3K can be written as
+
+\begin{equation}
+\ce{$E_{1} + MAP3K$ <=>[$v^{\text{act}}_{K3}$][$v^{\text{inh}}_{K3}$]
+\ce{$E_{1} + {pMAP3K}$}
+} \tag{3}
+\end{equation}
+
+
+It can also be rewritten as
+
+\begin{equation}
+\ce{$E_{1} + MAP3K$ <=>[$v^{\text{act}}_{K3}$][$v^{\text{inh}}_{K3}$]
+$[E_1-pMAP3K]$
+->[$V_{K_{3}}$]
+\ce{$E_{1} + {pMAP3K}$}
+} \tag{4}
+\end{equation}
+
+Using conclusion from Blom and Mooij's paper, there will be two constraints.
+\begin{equation}
+\frac{\mathrm{d} \text{$[E_1-pMAP3K]$}}{\mathrm{d} t} + \frac{\mathrm{d} \text{$[E_1]$}}{\mathrm{d} t}
+=  E_{1_0} + [MAP3K]_0 \tag{5}
+\end{equation}
+
+\begin{equation}
+\frac{\mathrm{d} \text{$[MAP3K]$}}{\mathrm{d} t} - \frac{\mathrm{d} \text{$[E_1]$}}{\mathrm{d} t}
+=  -V_{K_3} \frac{\mathrm{d} \text{$[E_1-pMAP3K]$}}{\mathrm{d} t} \tag{6}
+\end{equation}
+
+Obviously, two constraints are both related to intermediate product $[E_1-pMAP3K]$, which is not existed in our degenerated model.
+
+As a result, our $E_1$ $\rightarrow \text{MAP3K}$ has no constraint.
+Apparently, $\text{MAP3K} \rightarrow \text{MAP2K}$ and $\text{MAP2K} \rightarrow \text{MAPK}$ have no constraints either.
+
+## There is no constraints for combination of all three enzyme reactions in MAPK pathway. Proof is shown below.
+
+Lemma: To claim a constraint, there must exists some algebra manipulation on time-derivatives that result in non-convergence in equilibrium under some conditions.
+
+In our system,
+\begin{equation}
+\ce{$E_{1} + MAP3K$ <=>[$v^{\text{act}}_{K3}$][$v^{\text{inh}}_{K3}$]
+\ce{$E_{1} + {pMAP3K}$}
+} \tag{7}
+\end{equation}
+\begin{equation}
+\ce{${pMAP3K} + {MAP2K}$ <=>[$v^{\text{act}}_{K2}$][$v^{\text{inh}}_{K2}$]
+\ce{${pMAP3K} + {pMAP2K}$}
+} \tag{8}
+\end{equation}
+\begin{equation}
+\ce{${pMAP2K} + {MAPK}$ <=>[$v^{\text{act}}_{K1}$][$v^{\text{inh}}_{K1}$]
+\ce{${pMAP2K} + {pMAPK}$}
+} \tag{9}
+\end{equation}
+
+\begin{equation}
+\frac{\mathrm{d} \text{$[E_1]$}}{\mathrm{d} t} = 0 \tag{10}
+\end{equation}
+\begin{equation}
+\frac{\mathrm{d} \text{$[MAP3K]$}}{\mathrm{d} t} = - \frac{\mathrm{d} \text{${K_3}$}}{\mathrm{d} t}
+=  v^{\text{act}}_{K3}E_1(T_{K3}-K_3(t)) + v^{\text{inh}}_{K3}K_3(t) \tag{11}
+\end{equation}
+
+\begin{equation}
+\frac{\mathrm{d} \text{$[pMAP3K]$}}{\mathrm{d} t} = \frac{\mathrm{d} \text{${K_3}$}}{\mathrm{d} t} \tag{12}
+\end{equation}
+\begin{equation}
+\frac{\mathrm{d} \text{$[MAP2K]$}}{\mathrm{d} t} = - \frac{\mathrm{d} \text{${K_2}$}}{\mathrm{d} t}
+= \frac{(v^{\text{act}}_{K2})^2}{v^{\text{inh}}_{K2}}(K_3(t))^2(T_{K3}-K_2(t)) + v^{\text{act}}_{K2}K_3(t)K_2(t) + v^{\text{inh}}_{K2}K_2(t) \tag{13}
+\end{equation}
+
+\begin{equation}
+\frac{\mathrm{d} \text{$[pMAP2K]$}}{\mathrm{d} t} = \frac{\mathrm{d} \text{${K_2}$}}{\mathrm{d} t} \tag{14}
+\end{equation}
+\begin{equation}
+\frac{\mathrm{d} \text{$[MAPK]$}}{\mathrm{d} t} = - \frac{\mathrm{d} \text{${K_1}$}}{\mathrm{d} t}
+=  \frac{(v^{\text{act}}_{K1})^2}{v^{\text{inh}}_{K1}}(K_2(t))^2(T_{K2}-K_1(t)) + v^{\text{act}}_{K1}K_2(t)K_1(t) + v^{\text{inh}}_{K1}K_1(t) \tag{15}
+\end{equation}
+
+For all the nine time-derivatives above (eq.(7) to (15)), there is no combination that yields an outcome that is not dependent on parent variables. So there is no constrains on the system.
+
+## To conclude, our ODE derived CCM has no constraints on steady state for any intervention.
+
+# Table of intervention
+
+Since there is no constrain in this case, we can do intervention on all conditions we want, following tables summarise all possible intervention and their results.
+
+
+| Intervention                    | **$K_1$**                                                                            | **$K_2$**                                                    | **$K_3$**                            |
+|---------------------------------|----------------------------------------------------------------------------------|----------------------------------------------------------|----------------------------------|
+| none                            | $T_{k_1}g_2(\omega_{K_1}T_{k_2}g_2(\omega_{K_2}T_{k_3}g_1(\omega_{K_3}e_{10})))$ | $T_{k_2}g_2(\omega_{K_2}T_{k_3}g_1(\omega_{K_3}e_{10}))$ | $T_{k_3}g_1(\omega_{K_3}e_{10})$ |
+| $do(K_1=k_1)$                   | $k_1$                                                                            | $T_{k_2}g_2(\omega_{K_2}K_3)$                            | $T_{k_3}g_1(\omega_{K_3}E_1)$    |
+| $do(K_2=k_2)$                   | $T_{k_1}g_2(\omega_{K_1}k_2)$                                                    | $k_2$                                                    | $T_{k_3}g_1(\omega_{K_3}E_1)$    |
+| $do(K_3=k_3)$                   | $T_{k_1}g_2(\omega_{K_1}T_{k_2}g_2(\omega_{K_2}k_3))$                            | $T_{k_2}g_2(\omega_{K_2}k_3)$                            | $k_3$                            |
+| $do(K_1=k_1, K_2=k_2)$          | $k_1$                                                                            | $k_2$                                                    | $T_{k_3}g_1(\omega_{K_3}E_1)$    |
+| $do(K_1=k_1, K_3=k_3)$          | $k_1$                                                                            | $T_{k_2}g_2(\omega_{K_2}k_3)$                            | $k_3$                            |
+| $do(K_2=k_2, K_3=k_3)$          | $T_{k_1}g_2(\omega_{K_1}k_2)$                                                    | $k_2$                                                    | $k_3$                            |
+| $do(K_1=k_1, K_2=k_2, K_3=k_3)$ | $k_1$                                                                            | $k_2$                                                    | $k_3$                            |
+
+# References
+[1] T. Blom, J.M.Mooij (2019), *35th Annual Conference on Uncertainty in Artificial Intelligence*, Causal Constrain Models.
+
+[2] Uri Alon. Network Motif(book chapter 6 and appendix).
