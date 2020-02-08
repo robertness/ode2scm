@@ -24,7 +24,7 @@ mapk_ode <- function(states, rates){
     return(transition_function)
 }
 
-mapk_sde <- function(states, rates){
+mapk_sde <- function(states, rates, interventions = NULL){
     sde <- list()
 
     sde$Pre <- matrix(
@@ -57,8 +57,8 @@ mapk_sde <- function(states, rates){
         ), nrow=10, ncol=9, byrow=T
     )
 
-    sde$h <- function(states, t, parameters=rates){
-      with(as.list(c(states, parameters)), {
+    sde$h <- function(states, t, parameters=rates, interventions = NULL){
+      with(as.list(c(states, parameters, interventions)), {
         out <- c(
           raf_activate * Raf * E1,
           raf_deactivate * PRaf,

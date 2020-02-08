@@ -19,7 +19,7 @@ knitr::opts_chunk$set(
 ```{r}
 library(ode2scm)
 # Connect Python virtual environment
-use_virtualenv('venv', require=TRUE)
+# use_virtualenv('venv', require=TRUE)
 ```
 
 # Modeling and simulating the pathway

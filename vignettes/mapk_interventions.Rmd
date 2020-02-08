@@ -88,6 +88,9 @@ times <- seq(0, 120, by = .1)
 
 mapk_ode_instance <- mapk_ode(initial_states, rates)
 ode_out <- ode_sim(mapk_ode_instance, initial_states, times)
+
+mapk_sde_instance <- mapk_sde(states = initial_states, rates = rates)
+ode_out_sde <- sde_sim(mapk_sde_instance, initial_states, times)
 ```
 
 For comparison, the following code generates values according to the equilibrium solution.
